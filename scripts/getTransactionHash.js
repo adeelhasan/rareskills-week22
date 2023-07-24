@@ -1,39 +1,59 @@
+/// Based on this answer:
+/** https://ethereum.stackexchange.com/questions/78815/ethers-js-recover-public-key-from-contract-deployment-via-v-r-s-values/141938#141938
+    and
+    https://kebabsec.xyz/posts/rareskills-alphagoatclub-ctf/
+**/
 
-//the connection API is working
-//however the way the provider is interacting / being prepared is faulty
-const { encodeRlp, Transaction, AbiCoder, keccak256, Signature, SigningKey, resolveProperties } = require("ethers");
-const hre = require("hardhat");
+const { decodeRlp } = require("ethers");
 
-async function main() {
-    const tx = await ethers.provider.getTransaction("0xf25e29a951681c6dc49db7697ba3cafe0574c131e919966519a5ba11293c33ec");
-    const data = {
-        type: 2,
-        maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
-        maxFeePerGas: tx.maxFeePerGas,
-        gasLimit: tx.gasLimit,
-        to: tx.to,
-        value: tx.value,
-        nonce: tx.nonce,
-        data: tx.data,
-        chainId: tx.chainId,
+async function getSenderPublicKey(transactionHash) {
+    // Fetch the transaction details
+    const transaction = await ethers.provider.getTransaction(transactionHash);
+
+    const expandedSig = {
+        r: transaction.r,
+        s: transaction.s,
+        v: transaction.v,
     };
-    //console.log(tx);
 
-    //the hash of the serialized RLP encoded tx data
-    //const serializedData = Transaction.from(data).unsignedSerialized;
-    //const encodedData = encodeRlp(data);
-    //const coder = new AbiCoder.defaultAbiCoder();
-    const resolvedData = await resolveProperties(data);
-    const serializedData = Transaction.from(resolvedData).unsignedSerialized;
-    const hash = keccak256(serializedData);
-    const recoveredAddress = SigningKey.recoverPublicKey(hash, tx.signature);
+    const signature = transaction.signature;
 
-    console.log(recoveredAddress);
+    const transactionData = {
+        gasLimit: transaction.gasLimit,
+        value: transaction.value,
+        nonce: transaction.nonce,
+        data: transaction.data,
+        chainId: transaction.chainId,
+        to: transaction.to,
+        type: transaction.type,
+        maxFeePerGas: transaction.maxFeePerGas,
+        maxPriorityFeePerGas: transaction.maxPriorityFeePerGas,
+    };
+
+    const rstransaction = await hre.ethers.resolveProperties(transactionData);
+    const raw = ethers.Transaction.from(rstransaction).unsignedSerialized;
+    const msgHash = ethers.keccak256(raw);
+    const msgBytes = ethers.getBytes(msgHash);
+
+    console.log(signature);
+    console.log(msgHash);
+    //console.log(raw);
+
+    const publicKey = ethers.SigningKey.recoverPublicKey(msgBytes, signature);
+    const address = ethers.recoverAddress(msgBytes, signature);
+    const actualAddress = transaction.from;
+
+    if (actualAddress !== address) {
+        throw new Error("Failed to recover the public key");
+    }
+
+    return publicKey;
 }
 
-// We recommend this pattern to be able to use async/await everywhere
-// and properly handle errors.
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+(async () => {
+    //const transactionHash = "0xf25e29a951681c6dc49db7697ba3cafe0574c131e919966519a5ba11293c33ec";
+    const transactionHash = "0x09281ab72c20092dc9b414745ef2673116e36dfe069b61d2e37ecb8815b140bf";
+    
+    const publicKey = await getSenderPublicKey(transactionHash);
+    console.log("Sender Public Key:", publicKey);
+})();
